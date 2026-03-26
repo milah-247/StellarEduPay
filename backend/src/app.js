@@ -10,8 +10,10 @@ const studentRoutes  = require('./routes/studentRoutes');
 const paymentRoutes  = require('./routes/paymentRoutes');
 const feeRoutes      = require('./routes/feeRoutes');
 const reportRoutes   = require('./routes/reportRoutes');
+const networkRoutes  = require('./routes/networkRoutes');
 const { runConsistencyCheck } = require('./controllers/consistencyController');
 const { startPolling, stopPolling } = require('./services/transactionService');
+const { networkMonitor } = require('./services/network-monitor.service');
 const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning } = require('./services/retryService');
 const { startConsistencyScheduler } = require('./services/consistencyScheduler');
 const { initializeRetryQueue, setupMonitoring } = require('./config/retryQueueSetup');
@@ -56,6 +58,9 @@ app.use(concurrentMiddleware.requestQueue());
 async function gracefulShutdown(signal) {
   logger.info(`${signal} received, shutting down gracefully`);
   
+  // Stop network monitoring
+  networkMonitor.stop();
+  
   stopPolling();
   startRetryWorker && startRetryWorker.stop && startRetryWorker.stop();
   
@@ -83,6 +88,9 @@ async function initializeDatabase() {
 
 // Initialize services
 async function initializeServices() {
+  // Start network monitoring first
+  networkMonitor.start();
+  
   // Start existing services
   startPolling();
   startRetryWorker();
@@ -134,6 +142,9 @@ mongoose.connect(config.MONGO_URI)
   .then(async () => {
     logger.info('MongoDB connected');
 
+    // Start network monitoring first
+    networkMonitor.start();
+    
     // Start existing services
     startPolling();
     startConsistencyScheduler();
@@ -158,6 +169,7 @@ app.use('/api/students',  studentRoutes);
 app.use('/api/payments',  paymentRoutes);
 app.use('/api/fees',      feeRoutes);
 app.use('/api/reports',   reportRoutes);
+app.use('/api/v1/network', networkRoutes);
 app.get('/api/consistency', runConsistencyCheck);
 
 app.get('/health', async (req, res) => {

@@ -1,6 +1,7 @@
 'use strict';
 
-const { server, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/stellarConfig');
+const { getCurrentServer, isAcceptedAsset, CONFIRMATION_THRESHOLD } = require('../config/stellarConfig');
+const { networkMonitor } = require('./network-monitor.service');
 const Payment = require('../models/paymentModel');
 const Student = require('../models/studentModel');
 const PaymentIntent = require('../models/paymentIntentModel');
@@ -66,9 +67,17 @@ function validatePaymentAgainstFee(paymentAmount, expectedFee) {
 }
 
 async function checkConfirmationStatus(txLedger) {
-  const latestLedger = await server.ledgers().order('desc').limit(1).call();
-  const latestSequence = latestLedger.records[0].sequence;
-  return (latestSequence - txLedger) >= CONFIRMATION_THRESHOLD;
+  try {
+    const currentServer = getCurrentServer();
+    const latestLedger = await currentServer.ledgers().order('desc').limit(1).call();
+    const latestSequence = latestLedger.records[0].sequence;
+    return (latestSequence - txLedger) >= CONFIRMATION_THRESHOLD;
+  } catch (error) {
+    logger.error('Failed to check confirmation status', { error: error.message });
+    // Record transaction failure for monitoring
+    networkMonitor.recordTransactionResult(false);
+    throw error;
+  }
 }
 
 /**
@@ -172,7 +181,8 @@ async function recordPayment(data) {
 }
 
 async function verifyTransaction(txHash) {
-  const tx = await server.transactions().transaction(txHash).call();
+  const currentServer = getCurrentServer();
+  const tx = await currentServer.transactions().transaction(txHash).call();
   const valid = await extractValidPayment(tx);
   if (!valid) return null;
 
@@ -188,7 +198,8 @@ async function verifyTransaction(txHash) {
  * @returns {object|null} Verified transaction details, or null if no valid payment found
  */
 async function verifyTransaction(txHash, walletAddress) {
-  const tx = await server.transactions().transaction(txHash).call();
+  const currentServer = getCurrentServer();
+  const tx = await currentServer.transactions().transaction(txHash).call();
 
   // 1. Validate transaction success
   if (tx.successful === false) {
@@ -266,8 +277,9 @@ async function verifyTransaction(txHash, walletAddress) {
  */
 async function syncPaymentsForSchool(school) {
   const { schoolId, stellarAddress } = school;
+  const currentServer = getCurrentServer();
 
-  const transactions = await server
+  const transactions = await currentServer
     .transactions()
     .forAccount(stellarAddress)
     .order('desc')
