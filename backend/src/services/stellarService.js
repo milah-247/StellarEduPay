@@ -6,7 +6,10 @@ const Student = require('../models/studentModel');
 const PaymentIntent = require('../models/paymentIntentModel');
 const { validatePaymentAmount } = require('../utils/paymentLimits');
 const { generateReferenceCode } = require('../utils/generateReferenceCode');
+const { parseTransaction, validateParsedData, TransactionParseError } = require('./transactionParser');
 const logger = require('../utils/logger').child('StellarService');
+
+// Legacy helper functions - kept for backward compatibility where still needed
 
 function detectAsset(payOp) {
   const assetType = payOp.asset_type;
@@ -22,24 +25,68 @@ function normalizeAmount(rawAmount) {
 }
 
 /**
- * Extract and validate the payment operation from a transaction.
+ * Extract and validate the payment operation from a transaction using the new parser.
  * walletAddress is passed explicitly — supports per-school wallets.
  * Returns { payOp, memo, asset } or null if the transaction is invalid.
  */
 async function extractValidPayment(tx, walletAddress) {
-  if (!tx.successful) return null;
+  try {
+    const parsedTx = await parseTransaction(tx, walletAddress);
+    if (!parsedTx || !parsedTx.operations || parsedTx.operations.length === 0) {
+      return null;
+    }
 
-  const memo = tx.memo ? tx.memo.trim() : null;
-  if (!memo) return null;
+    // Validate parsed data
+    const validation = validateParsedData(parsedTx);
+    if (!validation.valid) {
+      logger.warn('Transaction validation failed', {
+        txHash: parsedTx.hash,
+        errors: validation.errors
+      });
+      return null;
+    }
 
-  const ops = await tx.operations();
-  const payOp = ops.records.find(op => op.type === 'payment' && op.to === walletAddress);
-  if (!payOp) return null;
+    // Get the first valid payment operation
+    const operation = parsedTx.operations[0];
+    
+    // Convert to legacy format for backward compatibility
+    const payOp = {
+      type: operation.type,
+      amount: operation.amount.toString(),
+      from: operation.from,
+      to: operation.to,
+      asset_type: operation.asset.type,
+      asset_code: operation.asset.code,
+      asset_issuer: operation.asset.issuer
+    };
 
-  const asset = detectAsset(payOp);
-  if (!asset) return null;
+    const asset = {
+      assetCode: operation.asset.code,
+      assetType: operation.asset.type,
+      assetIssuer: operation.asset.issuer
+    };
 
-  return { payOp, memo, asset };
+    return { 
+      payOp, 
+      memo: parsedTx.memo, 
+      asset 
+    };
+
+  } catch (error) {
+    if (error instanceof TransactionParseError) {
+      logger.debug('Transaction parsing failed', {
+        txHash: tx?.hash,
+        code: error.code,
+        message: error.message
+      });
+    } else {
+      logger.error('Unexpected error in extractValidPayment', {
+        txHash: tx?.hash,
+        error: error.message
+      });
+    }
+    return null;
+  }
 }
 
 function validatePaymentAgainstFee(paymentAmount, expectedFee) {
@@ -93,6 +140,8 @@ async function detectMemoCollision(memo, senderAddress, paymentAmount, expectedF
       reason: 'Memo "' + memo + '" was used by a different sender (' + recentFromOtherSender.senderAddress + ') within the last 24 hours',
     };
   }
+
+  return { suspicious: false, reason: null };
 }
 
 /**
@@ -171,16 +220,8 @@ async function recordPayment(data) {
   }
 }
 
-async function verifyTransaction(txHash) {
-  const tx = await server.transactions().transaction(txHash).call();
-  const valid = await extractValidPayment(tx);
-  if (!valid) return null;
-
-  const { payOp, memo, asset } = valid;
-  const amount = normalizeAmount(payOp.amount);
-
 /**
- * Verify a single transaction hash against a specific school wallet.
+ * Verify a single transaction hash against a specific school wallet using the new parser.
  * Throws structured errors for all failure cases so the controller can handle them uniformly.
  *
  * @param {string} txHash        - 64-char hex transaction hash
@@ -190,73 +231,86 @@ async function verifyTransaction(txHash) {
 async function verifyTransaction(txHash, walletAddress) {
   const tx = await server.transactions().transaction(txHash).call();
 
-  // 1. Validate transaction success
-  if (tx.successful === false) {
-    const err = new Error('Transaction was not successful on the Stellar network');
-    err.code = 'TX_FAILED';
-    throw err;
+  try {
+    // Use the new transaction parser
+    const parsedTx = await parseTransaction(tx, walletAddress);
+    
+    if (!parsedTx || !parsedTx.operations || parsedTx.operations.length === 0) {
+      const err = new Error(`No valid payment operation found targeting the school wallet (${walletAddress})`);
+      err.code = 'INVALID_DESTINATION';
+      throw err;
+    }
+
+    // Validate parsed data
+    const validation = validateParsedData(parsedTx);
+    if (!validation.valid) {
+      const err = new Error('Transaction validation failed: ' + validation.errors.map(e => e.message).join(', '));
+      err.code = 'VALIDATION_FAILED';
+      err.validationErrors = validation.errors;
+      throw err;
+    }
+
+    const memo = parsedTx.memo;
+    if (!memo) {
+      const err = new Error('Transaction memo is missing or empty — cannot identify student');
+      err.code = 'MISSING_MEMO';
+      throw err;
+    }
+
+    // Get the first payment operation
+    const operation = parsedTx.operations[0];
+    const amount = operation.amount;
+
+    // Validate payment amount is within configured limits
+    const limitValidation = validatePaymentAmount(amount);
+    if (!limitValidation.valid) {
+      const err = new Error(limitValidation.error);
+      err.code = limitValidation.code;
+      throw err;
+    }
+
+    // Look up student to validate fee
+    const student = await Student.findOne({ studentId: memo });
+    const feeAmount = student ? student.feeAmount : null;
+    
+    const feeValidation = feeAmount != null
+      ? validatePaymentAgainstFee(amount, feeAmount)
+      : { status: 'unknown', excessAmount: 0, message: 'Student not found, cannot validate fee' };
+
+    return {
+      hash: parsedTx.hash,
+      memo: memo,
+      studentId: memo,
+      amount: amount,
+      assetCode: operation.asset.code,
+      assetType: operation.asset.type,
+      feeAmount,
+      feeValidation,
+      networkFee: parsedTx.networkFee,
+      date: parsedTx.createdAt,
+      ledger: parsedTx.ledger,
+      senderAddress: operation.from,
+    };
+
+  } catch (error) {
+    if (error instanceof TransactionParseError) {
+      // Map parser errors to stellarService error codes
+      switch (error.code) {
+        case 'INVALID_TRANSACTION':
+        case 'TRANSACTION_FAILED':
+          const err = new Error('Transaction was not successful on the Stellar network');
+          err.code = 'TX_FAILED';
+          throw err;
+        case 'PARSING_ERROR':
+          const parseErr = new Error('Failed to parse transaction: ' + error.message);
+          parseErr.code = 'PARSE_ERROR';
+          throw parseErr;
+        default:
+          throw error;
+      }
+    }
+    throw error;
   }
-
-  const memo = tx.memo ? tx.memo.trim() : null;
-  if (!memo) {
-    const err = new Error('Transaction memo is missing or empty — cannot identify student');
-    err.code = 'MISSING_MEMO';
-    throw err;
-  }
-
-  const ops = await tx.operations();
-  const payOp = ops.records.find(op => op.type === 'payment' && op.to === walletAddress);
-  if (!payOp) {
-    const err = new Error(`No payment operation found targeting the school wallet (${walletAddress})`);
-    err.code = 'INVALID_DESTINATION';
-    throw err;
-  }
-
-  const asset = detectAsset(payOp);
-  if (!asset) {
-    const assetCode = payOp.asset_type === 'native' ? 'XLM' : (payOp.asset_code || payOp.asset_type);
-    const err = new Error(`Unsupported asset: ${assetCode}`);
-    err.code = 'UNSUPPORTED_ASSET';
-    err.assetCode = assetCode;
-    throw err;
-  }
-
-  const amount = normalizeAmount(payOp.amount);
-
-  // 5. Validate payment amount is within configured limits
-  const limitValidation = validatePaymentAmount(amount);
-  if (!limitValidation.valid) {
-    const err = new Error(limitValidation.error);
-    err.code = limitValidation.code;
-    throw err;
-  }
-
-  // 6. Look up student to validate fee (student lookup is not school-scoped here
-  //    since memo = studentId; recordPayment caller passes schoolId explicitly)
-  const student = await Student.findOne({ studentId: memo });
-  const feeAmount = student ? student.feeAmount : null;
-  
-  const feeValidation = feeAmount != null
-    ? validatePaymentAgainstFee(amount, feeAmount)
-    : { status: 'unknown', excessAmount: 0, message: 'Student not found, cannot validate fee' };
-
-  // Extract network fee from transaction
-  const networkFee = parseFloat(tx.fee_paid || '0') / 10000000; // Convert stroops to XLM
-
-  return {
-    hash: tx.hash,
-    memo: memo,
-    studentId: memo,
-    amount: amount,
-    assetCode: asset.assetCode,
-    assetType: asset.assetType,
-    feeAmount,
-    feeValidation,
-    networkFee,
-    date: tx.created_at,
-    ledger: tx.ledger_attr || tx.ledger || null,
-    senderAddress: payOp.from || null,
-  };
 }
 
 /**
@@ -383,7 +437,7 @@ async function syncPaymentsForSchool(school) {
         { schoolId, studentId: intent.studentId },
         {
           totalPaid: cumulativeTotal,
-          remainingBalance,
+          remainingBalance: remaining,
           feePaid: cumulativeTotal >= student.feeAmount,
         }
       );

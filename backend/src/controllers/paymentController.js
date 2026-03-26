@@ -23,6 +23,8 @@ const {
   finalizeConfirmedPayments,
 } = require('../services/stellarService');
 const { queueForRetry } = require('../services/retryService');
+const withMetrics = require('../services/withMetrics');
+const metricsService = require('../services/metricsService');
 const { SCHOOL_WALLET, ACCEPTED_ASSETS, server } = require('../config/stellarConfig');
 const StellarSdk = require('@stellar/stellar-sdk');
 
@@ -227,7 +229,9 @@ async function verifyPayment(req, res, next) {
 
     let result;
     try {
-      result = await verifyTransaction(txHash, req.school.stellarAddress);
+      result = await withMetrics('verifyTransaction', async () => {
+        return await verifyTransaction(txHash, req.school.stellarAddress);
+      });
     } catch (stellarErr) {
       // Record a failed payment entry for known failure codes so we have an audit trail
       if (PERMANENT_FAIL_CODES.includes(stellarErr.code)) {
@@ -309,6 +313,17 @@ async function verifyPayment(req, res, next) {
       verifiedAt: now,
     });
 
+    // Record payment outcome metrics
+    try {
+      metricsService.recordPaymentOutcome(
+        result.feeValidation.status,
+        false, // Not suspicious for successful verifications
+        result.hash
+      );
+    } catch (metricsError) {
+      // Don't let metrics errors affect payment processing
+    }
+
     const targetCurrency = req.school.localCurrency || 'USD';
     const conversion = await convertToLocalCurrency(result.amount, result.assetCode || 'XLM', targetCurrency);
 
@@ -359,7 +374,9 @@ async function syncAllPayments(req, res, next) {
 
 async function finalizePayments(req, res, next) {
   try {
-    await finalizeConfirmedPayments(req.schoolId);
+    await withMetrics('finalizeConfirmedPayments', async () => {
+      await finalizeConfirmedPayments(req.schoolId);
+    });
     res.json({ message: 'Finalization complete' });
   } catch (err) {
     next(err);

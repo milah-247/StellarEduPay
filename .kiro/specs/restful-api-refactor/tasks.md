@@ -32,21 +32,21 @@ This implementation plan refactors the StellarEduPay API to follow consistent RE
     - Update controller functions to match new parameter names
     - _Requirements: 1.3, 4.1_
 
-- [ ] 3. Implement standardized route naming conventions
-  - [ ] 3.1 Rename routes to follow REST conventions
+- [x] 3. Implement standardized route naming conventions
+  - [x] 3.1 Rename routes to follow REST conventions
     - Convert all resource names to plural nouns
     - Apply kebab-case for multi-word resources
     - Ensure descriptive action names for non-CRUD operations
     - _Requirements: 1.1, 1.2, 1.5_
 
-  - [ ] 3.2 Standardize HTTP method usage
+  - [x] 3.2 Standardize HTTP method usage
     - Ensure GET is used only for data retrieval
     - Use POST for creation and non-idempotent operations
     - Implement PATCH for partial updates where appropriate
     - Return correct HTTP status codes for each operation
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
 
-  - [ ] 3.3 Update query parameter conventions
+  - [x] 3.3 Update query parameter conventions
     - Implement consistent pagination parameters (limit, offset)
     - Standardize filtering and sorting parameter names
     - Use ISO 8601 format for all date parameters

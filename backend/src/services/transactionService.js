@@ -11,6 +11,7 @@
 const School = require('../models/schoolModel');
 const { syncPaymentsForSchool } = require('./stellarService');
 const { POLL_INTERVAL_MS } = require('../config');
+const withMetrics = require('./withMetrics');
 const logger = require('../utils/logger').child('TransactionPoller');
 
 let _timer = null;
@@ -20,7 +21,7 @@ function startPolling() {
   logger.info(`Starting — interval: ${POLL_INTERVAL_MS}ms`);
 
   const run = async () => {
-    try {
+    await withMetrics('syncPayments', async () => {
       const schools = await School.find({ isActive: true }).lean();
       if (schools.length === 0) return;
 
@@ -31,9 +32,7 @@ function startPolling() {
           logger.error(`Sync error for school ${schools[i].schoolId}`, { error: result.reason?.message, schoolId: schools[i].schoolId });
         }
       });
-    } catch (err) {
-      logger.error('Fatal sync error', { error: err.message, stack: err.stack });
-    }
+    });
   };
 
   run();

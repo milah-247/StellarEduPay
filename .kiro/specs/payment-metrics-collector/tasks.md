@@ -6,8 +6,8 @@ Instrument the existing StellarEduPay Node.js backend with a lightweight in-memo
 
 ## Tasks
 
-- [ ] 1. Create the metricsService module with in-memory store
-  - [ ] 1.1 Create `backend/src/services/metricsService.js`
+- [x] 1. Create the metricsService module with in-memory store
+  - [x] 1.1 Create `backend/src/services/metricsService.js`
     - Implement `MetricDataPoint` structure: `{ name, durationMs, status, errorCode, recordedAt }`
     - Implement `PaymentOutcomeCounters` with `seenTxHashes` Set for deduplication
     - Implement `RetryCounters` object
@@ -55,21 +55,21 @@ Instrument the existing StellarEduPay Node.js backend with a lightweight in-memo
     - **Validates: Requirements 5.1, 5.2**
 
 - [ ] 2. Create the withMetrics wrapper and wire into existing services
-  - [ ] 2.1 Create `backend/src/services/withMetrics.js`
+  - [x] 2.1 Create `backend/src/services/withMetrics.js`
     - Implement `async function withMetrics(operationName, fn)` — records start time, awaits `fn()`, calls `metricsService.record()` in both success and failure paths, re-throws original error on failure
     - Wrap `metricsService.record` call in try/catch so metrics errors never propagate
     - _Requirements: 1.1–1.5, 8.1, 8.2, 8.3_
 
-  - [ ] 2.2 Wrap `syncPayments` in `transactionService.js`
+  - [x] 2.2 Wrap `syncPayments` in `transactionService.js`
     - Import `withMetrics` and wrap the `syncPayments()` call inside the polling `run()` function with operation name `"syncPayments"`
     - _Requirements: 1.4, 2.4_
 
-  - [ ] 2.3 Wrap `verifyTransaction` in `paymentController.js`
+  - [x] 2.3 Wrap `verifyTransaction` in `paymentController.js`
     - Wrap the `verifyTransaction(txHash)` call with `withMetrics("verifyTransaction", ...)` 
     - Wrap the Stellar Horizon API call inside `stellarService.js` `verifyTransaction` with operation name `"stellar_horizon"` to capture network latency separately
     - _Requirements: 1.4, 3.1–3.3_
 
-  - [ ] 2.4 Wrap `finalizeConfirmedPayments` in `paymentController.js`
+  - [x] 2.4 Wrap `finalizeConfirmedPayments` in `paymentController.js`
     - Wrap the `finalizeConfirmedPayments()` call with `withMetrics("finalizeConfirmedPayments", ...)`
     - _Requirements: 1.4_
 
@@ -92,14 +92,14 @@ Instrument the existing StellarEduPay Node.js backend with a lightweight in-memo
   - Run `npm test` and confirm all existing tests still pass alongside new property tests. Ask the user if any questions arise.
 
 - [ ] 4. Create the metrics HTTP endpoint
-  - [ ] 4.1 Create `backend/src/controllers/metricsController.js`
+  - [x] 4.1 Create `backend/src/controllers/metricsController.js`
     - Implement `GET /api/metrics` handler
     - Parse and validate `?window` query param: must be a positive integer; return 400 with `{ error: "...", code: "INVALID_WINDOW" }` if invalid
     - Call `metricsService.getSnapshot(windowMinutes)` and return result as JSON with status 200
     - Wrap in try/catch; return 500 on unexpected errors
     - _Requirements: 4.1, 4.2, 4.7, 4.8_
 
-  - [ ] 4.2 Create `backend/src/routes/metricsRoutes.js` and mount in `app.js`
+  - [x] 4.2 Create `backend/src/routes/metricsRoutes.js` and mount in `app.js`
     - Create route file: `router.get('/', metricsController.getMetrics)`
     - Mount in `app.js`: `app.use('/api/metrics', metricsRoutes)`
     - _Requirements: 4.1_

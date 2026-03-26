@@ -42,28 +42,28 @@ router.get('/overpayments',                  getOverpayments);
 router.get('/suspicious',                    getSuspiciousPayments);
 router.get('/pending',                       getPendingPayments);
 router.get('/retry-queue',                   getRetryQueue);
-router.get('/rates',                         getExchangeRates);
+router.get('/exchange-rates',                getExchangeRates);
 
 // ── Collection routes ────────────────────────────────────────────────────────
 router.get('/',                              getAllPayments);
 
 // ── Dead Letter Queue endpoints ──────────────────────────────────────────────
-router.get('/dlq',                           getDeadLetterJobs);
-router.post('/dlq/:id/retry',                retryDeadLetterJob);
+router.get('/dead-letter-queue',             getDeadLetterJobs);
+router.post('/dead-letter-queue/:id/retry',  retryDeadLetterJob);
 
 // ── POST routes (mutating operations) ────────────────────────────────────────
-router.post('/intent',                       idempotency, validateCreatePaymentIntent, createPaymentIntent);
+router.post('/intents',                      idempotency, validateCreatePaymentIntent, createPaymentIntent);
 router.post('/verify',                       idempotency, validateVerifyPayment, verifyPayment);
 router.post('/sync',                         syncAllPayments);
 router.post('/finalize',                     finalizePayments);
 
 // ── Parameterized routes (must come last) ────────────────────────────────────
-router.get('/balance/:studentId',            validateStudentIdParam, getStudentBalance);
-router.get('/instructions/:studentId',       validateStudentIdParam, getPaymentInstructions);
-router.get('/:studentId',                    validateStudentIdParam, getStudentPayments);
+router.get('/students/:studentId/balance',   validateStudentIdParam, getStudentBalance);
+router.get('/students/:studentId/instructions', validateStudentIdParam, getPaymentInstructions);
+router.get('/students/:studentId',           validateStudentIdParam, getStudentPayments);
 
 // ── Payment locking mechanism ────────────────────────────────────────────────
-router.post('/:paymentId/lock',              lockPaymentForUpdate);
-router.post('/:paymentId/unlock',            unlockPayment);
+router.patch('/:paymentId/lock',             lockPaymentForUpdate);
+router.patch('/:paymentId/unlock',           unlockPayment);
 
 module.exports = router;

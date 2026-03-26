@@ -10,6 +10,7 @@ const studentRoutes  = require('./routes/studentRoutes');
 const paymentRoutes  = require('./routes/paymentRoutes');
 const feeRoutes      = require('./routes/feeRoutes');
 const reportRoutes   = require('./routes/reportRoutes');
+const metricsRoutes  = require('./routes/metricsRoutes');
 const { runConsistencyCheck } = require('./controllers/consistencyController');
 const { startPolling, stopPolling } = require('./services/transactionService');
 const { startRetryWorker, stopRetryWorker, isRetryWorkerRunning } = require('./services/retryService');
@@ -158,6 +159,7 @@ app.use('/api/students',  studentRoutes);
 app.use('/api/payments',  paymentRoutes);
 app.use('/api/fees',      feeRoutes);
 app.use('/api/reports',   reportRoutes);
+app.use('/api/metrics',   metricsRoutes);
 app.get('/api/consistency', runConsistencyCheck);
 
 app.get('/health', async (req, res) => {
