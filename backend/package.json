@@ -5,7 +5,10 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "seed": "node ../scripts/seed-test-data.js"
+    "seed": "node ../scripts/seed-test-data.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.0.0",
